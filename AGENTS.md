@@ -10,7 +10,7 @@ Invoice approval demo app: ASP.NET Core Web API targeting .NET 10, with a static
 - `backend/tests/InvoiceApp.Tests`: xUnit tests, including `ApprovalServiceTests` and `FakeInvoiceRepository`.
 - `e2e`: Playwright configuration and `tests/` and `pages/` directories. Playwright is configured, but those directories currently have no test cases or page objects.
 - `docs/use-cases`: feature briefs.
-- `openspec/changes/add-invoice-approval-limits/`: reviewed proposal, spec, design, and task breakdown for invoice approval limits. Use these as the implementation scope; resolve any mismatch with the actual role model before coding.
+- `openspec/changes/add-invoice-approval-limits/`: reviewed proposal, design, tasks, and authoritative approval-limit spec. Follow these artifacts; report implementation conflicts rather than changing approved requirements.
 
 ## Existing Conventions
 
@@ -26,22 +26,13 @@ Invoice approval demo app: ASP.NET Core Web API targeting .NET 10, with a static
 
 ## Invoice Approval Limits
 
-Before implementation, inspect the current role configuration and authentication flow, `[RequireRole]` usage, `Invoice` and `InvoiceStatus`, `ApprovalService`, repository behavior, and any existing approval-history representation. The current role values are strings; do not assume `Approver` means Manager or `Admin` means Director, or infer Admin's approval authority. Reconcile role mapping and authority with the reviewed OpenSpec change and get the decision approved before coding. The current proposal/tasks include role-mapping assumptions that must be verified against the application and product decision.
+The feature's business requirements and acceptance scenarios are authoritative in `openspec/changes/add-invoice-approval-limits/specs/invoice-approval-limits/spec.md`; read it with the change's `proposal.md`, `design.md`, and `tasks.md` before implementation. In brief: Manager's inclusive single-approver limit is 50,000; Director's and Admin's are 500,000; the existing `Approver` role is Manager-compatible. Above 500,000, the spec permits a Manager, Director, or Admin first approval and requires a distinct Director for the second. Rejections must give a clear reason without changing invoice or approval-history state. The spec also governs valid business rejection, repeated attempts, history, and concurrency.
 
-The approved feature requirements are:
-
-- A Manager may approve an invoice up to and including 50,000.
-- A Director may approve an invoice up to and including 500,000.
-- Monetary limits are inclusive. Tests must cover each boundary and amounts immediately above it.
-- An invoice above 500,000 requires two distinct approvers. The second approver must be a Director.
-- The same authenticated user must never count as both approvers for one invoice.
-- A rejected approval attempt must return a clear reason and leave invoice data and approval history unchanged.
-
-Keep approval rules in the existing Domain/service layer. Follow existing repository interfaces, dependency injection, error handling, and persistence conventions. Validate the full decision before mutating persistent state. Consider atomicity and concurrent attempts on the same invoice; do not allow parallel requests to bypass a limit, duplicate an approver, or partially record a rejected operation.
+Inspect the implementation before coding. Keep policy in the Domain/service layer, validate before mutation, follow existing repository, dependency-injection, error-handling, authorization, and persistence patterns, and consider transaction boundaries and concurrent attempts. If code conflicts with the approved spec, report the conflict; do not silently change the spec or role decisions.
 
 ## Staged Workflow
 
-Use the reviewed `proposal.md`, capability spec, `design.md`, and `tasks.md` under `openspec/changes/add-invoice-approval-limits/` as the task source. Do not ask an agent to implement both stages as one unreviewed change. Resolve the role-mapping issue above before starting the affected implementation.
+Use the reviewed OpenSpec proposal, capability spec, design, and task breakdown as the task source. Implement one approved stage at a time; do not combine both stages into one unreviewed change.
 
 ### Stage 1: Single-Approver Limits
 
@@ -58,19 +49,9 @@ Use the reviewed `proposal.md`, capability spec, `design.md`, and `tasks.md` und
 
 ## Test Expectations
 
-Use xUnit and `FakeInvoiceRepository` for Domain service tests. At minimum, cover:
+Use xUnit and `FakeInvoiceRepository` for Domain service tests. Derive coverage from the OpenSpec scenarios, including boundaries and just-above values, valid and invalid second approvals, duplicate identities, repeats, rejection after a first approval, concurrency, clear reasons, and unchanged invoice/history state. An error-message assertion alone is insufficient when state preservation is required.
 
-- Manager approval at 50,000 and rejection immediately above 50,000.
-- Director approval at 500,000 and rejection immediately above 500,000 when acting alone.
-- Successful two-person approval above 500,000.
-- Rejection when the same user attempts to satisfy both approvals, or when the second approver is not a Director.
-- Clear reasons for rejected attempts and unchanged invoice status, amount, decision fields, approval records, and history.
-- Rejection after an earlier approval has been recorded, where applicable; verify the first approval and pending status remain unchanged.
-- Relevant repeated and concurrent attempts so decisions cannot be duplicated or overwritten.
-
-For every AI-generated test, explain in its test name, review notes, or PR summary which defect it detects. Review each assertion: an error-message assertion alone is insufficient when the requirement also demands unchanged state. A human must verify AI-generated code and tests.
-
-Add one Playwright end-to-end test using the actual UI and API flow: create/submit an invoice above the acting user's single-approver limit, attempt approval in the UI, verify the displayed rejection reason, and verify the invoice remains unchanged. Use `e2e/playwright.config.ts` and accessible locators where practical.
+For each AI-generated test, state which defect it detects in the test name, review notes, or PR summary. Review every assertion and have a human verify generated tests and code. Add the required Playwright test using the real UI/API flow to verify an over-limit denial, its displayed reason, and unchanged invoice state. Use `e2e/playwright.config.ts` and accessible locators where practical.
 
 ## Build, Test, and Mutation Testing
 
@@ -97,7 +78,7 @@ npm test
 Pop-Location
 ```
 
-Use the installed `dotnet-stryker` tool from the unit-test project directory to assess how well the unit tests detect code changes. Stryker generates code mutants; it does not write xUnit tests. No Stryker configuration file is currently present; do not invent one or add one without a reason. The CLI usage supports this invocation:
+Use Stryker.NET (`dotnet-stryker` 5.0.0) from the unit-test project directory to assess how well unit tests detect code changes. Stryker generates code mutants; it does not write xUnit tests. No Stryker configuration file is present; do not invent one or add one without a reason. The verified invocation is:
 
 ```powershell
 Push-Location backend/tests/InvoiceApp.Tests
@@ -105,7 +86,7 @@ dotnet stryker
 Pop-Location
 ```
 
-Capture actual mutation results before test improvements and again afterward. Report the mutation score, killed and surviving mutants, and explain important survivors. Never invent results or claim a command succeeded unless it was executed and verified.
+Capture actual mutation results before test improvements and again afterward. Report the score, killed and surviving mutants, and important survivors. Never invent results or claim a command succeeded unless it was executed and verified.
 
 ## Agent Responsibilities
 
@@ -132,9 +113,9 @@ Prioritize monetary boundary errors, authorization bypasses, duplicate approver 
 
 Maintain a root `AI_INTERACTION_LOG.md` with meaningful AI interactions: date/task, agent or tool, prompt or faithful summary, files changed, commands and actual results, human review decisions, and follow-up actions. Do not log credentials, tokens, or customer data. Use existing hooks or automation only when configured and verified; otherwise record entries manually. Check that automated records are real and accurate.
 
-Maintain root `ASSIGNMENT.md` with the implementation approach, specification, test results, mutation scores before and after improvements, pull-request findings and verdicts, and review outcomes.
+Maintain root `ASSIGNMENT.md` with the implementation approach, specification, actual test results, mutation scores before and after improvements, pull-request findings and verdicts, review outcomes, and demo video link.
 
-Final assignment deliverables: pull request on the fork with at least three meaningful commits; updated root `AGENTS.md`; committed OpenSpec artifacts; unit tests; Playwright test; mutation results; review verdicts; `AI_INTERACTION_LOG.md`; and `ASSIGNMENT.md`. Keep Stage 1 and Stage 2 in separate commits, and keep any additional commit independently meaningful.
+Final assignment deliverables: pull request on the fork with at least three meaningful commits; updated root `AGENTS.md`; committed OpenSpec artifacts; unit tests; Playwright test; mutation results; review verdicts; `AI_INTERACTION_LOG.md`; and `ASSIGNMENT.md`. Keep Stage 1 and Stage 2 in separate commits; any additional commit must be independently meaningful.
 
 ## Never
 
