@@ -52,13 +52,18 @@ The system MUST require two approvals for an invoice whose amount is greater tha
 - **THEN** the attempt is rejected with a clear reason
 - **AND** the invoice remains PendingApproval and the existing approval history is unchanged
 
+#### Scenario: Every permitted first-approver role can start the sequence
+- **WHEN** a Manager, Director, or Admin is the first approver for an invoice above $500,000
+- **THEN** that approver is recorded as the first approval and the invoice remains PendingApproval
+- **AND** a different Director can provide the second approval and complete the invoice
+
 ### Requirement: Rejected approval attempts explain the denial
 
 The system MUST return a non-success response with a clear reason when it denies an approval attempt. The existing `Approver` role is not unsupported; it maps to Manager authority.
 
 #### Scenario: Unsupported role attempts approval
-- **WHEN** an authenticated user with a role other than Manager, Director, Admin, or the compatible `Approver` role attempts approval
-- **THEN** the request is denied with a clear reason
+- **WHEN** an authenticated user with a role other than Manager, Director, Admin, or the compatible `Approver` role sends an HTTP approval request
+- **THEN** the API returns HTTP 403 with a non-empty `error` reason
 - **AND** the invoice and its approval history remain unchanged
 
 #### Scenario: Approval exceeds the single-approver limit
@@ -84,11 +89,40 @@ When the system rejects an approval attempt, it MUST leave the invoice amount, s
 - **THEN** the invoice becomes Rejected and the rejection is recorded
 - **AND** this valid business decision is distinct from a rejected authorization attempt
 
+#### Scenario: Authorized approver rejects after the first high-value approval
+- **WHEN** an authorized role rejects an invoice above $500,000 that has one approval recorded and is still PendingApproval
+- **THEN** the invoice becomes Rejected and the rejection is appended to approval history
+- **AND** the first approval entry remains unchanged
+- **AND** the final decision fields describe the rejection
+
 ### Requirement: Approval transitions are concurrency-safe
 
-The system MUST apply each approval decision atomically per invoice so concurrent requests cannot bypass limits, record one identity as two approvers, overwrite prior decisions, or complete the same approval transition more than once. Rejected concurrent attempts MUST leave the accepted decision and invoice state unchanged.
+The system MUST apply each approval or rejection decision atomically per invoice and re-evaluate it against the latest committed state. The first committed operation determines serialization order. Concurrent requests MUST NOT bypass limits, record one identity as two approvers, overwrite prior decisions, or complete the same approval transition more than once. Rejected concurrent attempts MUST leave the state and history from the accepted operation unchanged.
 
-#### Scenario: Concurrent requests cannot duplicate an approval
-- **WHEN** concurrent approval requests target the same invoice and would otherwise conflict in role, identity, sequence, or invoice status
-- **THEN** the system accepts only a valid serialized transition
-- **AND** any rejected request returns a clear reason without changing the accepted result or approval history
+#### Scenario: Simultaneous first approvals are re-evaluated in commit order
+- **WHEN** a Manager, Director, or Admin first approval races with another approval for the same invoice above $500,000
+- **THEN** only the first committed approval is recorded as the first approval
+- **AND** the later request is evaluated as a second approval and succeeds only if it is from a different Director
+- **AND** a rejected later request leaves the first approval and PendingApproval status unchanged
+
+#### Scenario: Concurrent first approval and rejection follow commit order
+- **WHEN** a first approval and an authorized rejection race for the same pending invoice above $500,000
+- **THEN** the first committed operation is applied and the other request is re-evaluated against its resulting state
+- **AND** if the first approval commits first, the authorized rejection may reject the still-pending invoice and must retain that approval entry
+- **AND** if rejection commits first, the later approval is denied without changing the rejection or history
+
+#### Scenario: Concurrent second approval and rejection follow commit order
+- **WHEN** a second approval and an authorized rejection race for an invoice above $500,000 that has one approval recorded
+- **THEN** the first committed operation is applied and the other request is re-evaluated against its resulting state
+- **AND** if the distinct Director second approval commits first, the later rejection is denied without changing the Approved status or history
+- **AND** if rejection commits first, the later approval is denied without changing the Rejected status or history
+
+#### Scenario: Concurrent second approvals cannot finalize twice
+- **WHEN** two requests attempt the second approval for the same invoice above $500,000
+- **THEN** at most one valid distinct Director approval is recorded and the invoice becomes Approved once
+- **AND** every later request is denied with a clear reason and adds no history entry
+
+#### Scenario: Concurrent attempts by the first approver cannot count twice
+- **WHEN** the first approver races another request to provide the second approval
+- **THEN** the same authenticated identity is never recorded as both approvers
+- **AND** any denied request leaves the first approval and invoice status unchanged

@@ -8,9 +8,9 @@ Invoice decisions currently have no monetary authorization limits and record onl
 
 - Add single-approver limits: Managers may approve up to and including $50,000; Directors and Admins may approve up to and including $500,000.
 - Require two distinct approvers for amounts above $500,000. The first approval may be by a Manager, Director, or Admin; the second must be by a different Director. This paired path is the explicit exception that allows a Manager or Admin to participate above their single-approver limit.
-- Reject unsupported roles, over-limit single approvals, duplicate approvers, and repeat decisions with a clear API reason and no invoice or approval-history mutation.
-- Preserve approval decisions as history and prevent concurrent requests from bypassing the amount, identity, or sequence rules.
-- Deliver the implementation in two independently testable stages: single-approver limits, then two-approver decisions. Add a Playwright UI test for a rejected Manager over-limit approval.
+- Reject unsupported roles, over-limit single approvals, duplicate approvers, and repeat decisions with a clear API reason and no invoice or approval-history mutation; verify unsupported-role denial through the HTTP API.
+- Preserve approval decisions as history, including a valid rejection after a first high-value approval, and serialize concurrent decisions so later requests are checked against committed state.
+- Deliver the implementation in two independently testable stages: single-approver limits, then two-approver decisions and their negative/race tests. Add a Playwright UI test for an over-limit denial that verifies the invoice remains unchanged.
 
 ## Capabilities
 

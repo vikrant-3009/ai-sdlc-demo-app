@@ -25,9 +25,13 @@ Pass the authenticated username and role from the API into the domain decision o
 
 **Alternative considered:** Put amount checks in `ApprovalsController` or JavaScript. Rejected because requests can bypass the UI and because it would move business rules out of the project's Domain boundary.
 
+Verify unsupported-role denial at the HTTP boundary, not only in Domain unit tests: an authenticated user whose role is outside the approval allowlist must receive 403 with a non-empty `error` reason, and the invoice must remain unchanged. The current test project is Domain-focused, so use an actual API request in the configured Playwright environment or establish an API test harness only if justified; do not treat a service unit test as sufficient evidence for the filter response.
+
 ### Record every approval decision
 
 For the two-approver stage, add an approval-history collection to the invoice's domain representation, with each entry retaining the authenticated username, role, decision time, and decision outcome. Keep the existing `DecidedBy`, `DecidedAt`, and `DecisionNote` fields for compatibility with current clients; on completed decisions they continue to describe the final invoice outcome, while the history preserves both approvals. A first approval above $500,000 is recorded in history while invoice status remains PendingApproval.
+
+An authorized rejection is a valid business decision while the invoice is PendingApproval, including after its first high-value approval. Append the rejection entry and retain the first approval entry unchanged; set the invoice's final status and decision fields to the rejection. A rejected approval attempt is different: it must append nothing and leave all invoice and history state unchanged.
 
 **Alternative considered:** Reuse only `DecidedBy` and `DecidedAt`. Rejected because those fields cannot distinguish two decisions or prove that two different people approved the invoice.
 
@@ -35,7 +39,9 @@ For the two-approver stage, add an approval-history collection to the invoice's 
 
 The repository boundary must perform the read, status/role/identity checks, history append, and resulting status update as one atomic operation for one invoice. The in-memory implementation can serialize this operation under a per-invoice lock or a repository lock; any later database implementation must use a transaction or concurrency token with equivalent behavior. Do not rely on the existing locks around `GetById` and `Update` separately, because two requests can otherwise both pass checks against stale state.
 
-**Alternative considered:** Leave service-level read/check/update unchanged and test only sequential calls. Rejected because that does not protect the same-approver and repeated-transition rules under concurrent requests.
+After serialization, re-evaluate each request against the latest committed invoice state. The first committed operation determines the order: only one simultaneous first approval is recorded as the first entry; a later request is treated as the next approval and must satisfy the distinct-Director rule. For an already-started high-value approval, a rejection that commits while the invoice is still pending finalizes it as Rejected and retains its approval history; a second approval that commits first finalizes it as Approved, after which a rejection is denied. Of concurrent second approvals, at most one valid distinct Director finalizes the invoice; subsequent requests see the completed status and are denied without another entry. Every denied request leaves the state produced by the accepted operation unchanged.
+
+**Alternative considered:** Leave service-level read/check/update unchanged and test only sequential calls. Rejected because that does not protect the same-approver and repeated-transition rules under concurrent requests. A lock makes operations atomic but does not promise a particular winner before commit order is established; tests must assert the invariant and each permitted serialized outcome, not assume a scheduler order.
 
 ### Keep the policy tiers and role compatibility explicit
 
