@@ -27,5 +27,9 @@ public class ApprovalsController : ApiControllerBase
 
     [HttpPost("{invoiceId}/reject")]
     public ActionResult<Invoice> Reject(string invoiceId, [FromBody] RejectRequest request) =>
-        Handle(() => _approvals.Reject(invoiceId, HttpContext.GetSession().Username, request.Reason));
+        Handle(() => _approvals.Reject(
+            invoiceId,
+            HttpContext.GetSession().Username,
+            HttpContext.GetSession().Role,
+            request.Reason));
 }

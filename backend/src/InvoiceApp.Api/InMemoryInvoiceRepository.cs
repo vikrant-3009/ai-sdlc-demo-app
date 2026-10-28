@@ -12,25 +12,29 @@ public class InMemoryInvoiceRepository : IInvoiceRepository
     {
         new Invoice { Id = "INV-1001", CustomerName = "Lakeside School District", Amount = 4250.00m, Status = InvoiceStatus.PendingApproval },
         new Invoice { Id = "INV-1002", CustomerName = "Hilltop Academy", Amount = 980.50m, Status = InvoiceStatus.PendingApproval },
-        new Invoice { Id = "INV-1003", CustomerName = "Riverside Charter", Amount = 12300.00m, Status = InvoiceStatus.Approved, DecidedBy = "demo.approver", DecidedAt = DateTime.UtcNow.AddDays(-2) },
+        CreatePreviouslyApprovedInvoice(),
         new Invoice { Id = "INV-1004", CustomerName = "Oakwood Independent", Amount = 615.75m, Status = InvoiceStatus.PendingApproval },
         new Invoice { Id = "INV-1005", CustomerName = "Maple Grove Prep", Amount = 310.00m, Status = InvoiceStatus.Draft },
     };
 
     public IReadOnlyList<Invoice> GetAll()
     {
-        lock (_lock) return _invoices.ToList();
+        lock (_lock) return _invoices.Select(Copy).ToList();
     }
 
     public Invoice? GetById(string id)
     {
-        lock (_lock) return _invoices.FirstOrDefault(i => i.Id == id);
+        lock (_lock)
+        {
+            var invoice = _invoices.FirstOrDefault(i => i.Id == id);
+            return invoice is null ? null : Copy(invoice);
+        }
     }
 
     public IReadOnlyList<Invoice> GetByIds(IEnumerable<string> ids)
     {
         var wanted = ids.ToHashSet();
-        lock (_lock) return _invoices.Where(i => wanted.Contains(i.Id)).ToList();
+        lock (_lock) return _invoices.Where(i => wanted.Contains(i.Id)).Select(Copy).ToList();
     }
 
     public Invoice Add(Invoice invoice)
@@ -42,8 +46,9 @@ public class InMemoryInvoiceRepository : IInvoiceRepository
                 invoice.Id = $"INV-{_nextNumber++}";
             }
 
-            _invoices.Add(invoice);
-            return invoice;
+            var stored = Copy(invoice);
+            _invoices.Add(stored);
+            return Copy(stored);
         }
     }
 
@@ -52,12 +57,60 @@ public class InMemoryInvoiceRepository : IInvoiceRepository
         lock (_lock)
         {
             var index = _invoices.FindIndex(i => i.Id == invoice.Id);
-            if (index >= 0) _invoices[index] = invoice;
+            if (index >= 0) _invoices[index] = Copy(invoice);
+        }
+    }
+
+    public Invoice UpdateAtomically(string id, Action<Invoice> transition)
+    {
+        lock (_lock)
+        {
+            var index = _invoices.FindIndex(invoice => invoice.Id == id);
+            if (index < 0)
+            {
+                throw new KeyNotFoundException($"Invoice {id} was not found.");
+            }
+
+            var updated = Copy(_invoices[index]);
+            transition(updated);
+            _invoices[index] = updated;
+            return Copy(updated);
         }
     }
 
     public bool Remove(string id)
     {
         lock (_lock) return _invoices.RemoveAll(i => i.Id == id) > 0;
+    }
+
+    private static Invoice Copy(Invoice invoice) => new()
+    {
+        Id = invoice.Id,
+        CustomerName = invoice.CustomerName,
+        Amount = invoice.Amount,
+        Status = invoice.Status,
+        CreatedAt = invoice.CreatedAt,
+        DecidedBy = invoice.DecidedBy,
+        DecidedAt = invoice.DecidedAt,
+        DecisionNote = invoice.DecisionNote,
+        ApprovalHistory = invoice.ApprovalHistory.ToList()
+    };
+
+    private static Invoice CreatePreviouslyApprovedInvoice()
+    {
+        var decidedAt = DateTime.UtcNow.AddDays(-2);
+        return new Invoice
+        {
+            Id = "INV-1003",
+            CustomerName = "Riverside Charter",
+            Amount = 12300.00m,
+            Status = InvoiceStatus.Approved,
+            DecidedBy = "demo.approver",
+            DecidedAt = decidedAt,
+            ApprovalHistory = new List<ApprovalHistoryEntry>
+            {
+                new("demo.approver", "Approver", decidedAt, ApprovalOutcome.Approved, null)
+            }
+        };
     }
 }
