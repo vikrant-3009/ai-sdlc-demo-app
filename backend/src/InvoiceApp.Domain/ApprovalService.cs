@@ -28,10 +28,19 @@ public class ApprovalService
         return invoice;
     }
 
-    public Invoice Approve(string invoiceId, string approver)
+    public Invoice Approve(string invoiceId, string approver, string role)
     {
+        var (approvalRole, limit) = GetSingleApproverPolicy(role);
         var invoice = Find(invoiceId);
         EnsurePending(invoice);
+
+        if (invoice.Amount > limit)
+        {
+            var reason = approvalRole == "Manager"
+                ? "Manager approval limit is $50,000."
+                : "An invoice above $500,000 requires a second Director approval.";
+            throw new InvalidOperationException(reason);
+        }
 
         invoice.Status = InvoiceStatus.Approved;
         invoice.DecidedBy = approver;
@@ -61,6 +70,13 @@ public class ApprovalService
     private Invoice Find(string invoiceId) =>
         _repository.GetById(invoiceId)
         ?? throw new KeyNotFoundException($"Invoice {invoiceId} was not found.");
+
+    private static (string Role, decimal Limit) GetSingleApproverPolicy(string role) => role switch
+    {
+        "Manager" or "Approver" => ("Manager", 50_000m),
+        "Director" or "Admin" => (role, 500_000m),
+        _ => throw new InvalidOperationException($"Role '{role}' is not authorized to approve invoices.")
+    };
 
     private static void EnsurePending(Invoice invoice)
     {
