@@ -64,16 +64,19 @@
   function renderPending(pending) {
     show('pending-empty', pending.length === 0);
     $('pending-list').replaceChildren(...pending.map((invoice) => {
-      const reasonId = `reason-${invoice.id}`;
       const approve = el('button', { type: 'button', 'aria-label': `Approve invoice ${invoice.id}` }, 'Approve');
       const reject = el('button', { type: 'button', class: 'danger', 'aria-label': `Reject invoice ${invoice.id}` }, 'Reject');
-      const reason = el('input', { id: reasonId, 'aria-label': `Rejection reason for ${invoice.id}`, placeholder: 'Reason (required to reject)' });
+      const reason = el('input', { id: `reason-${invoice.id}`, 'aria-label': `Rejection reason for ${invoice.id}`, placeholder: 'Reason (required to reject)' });
+      const approvals = (invoice.approvalHistory || []).filter((entry) => entry.outcome === 'Approved');
+      const secondApprovalStatus = invoice.amount > 500000 && approvals.length === 1
+        ? 'Awaiting second Director approval'
+        : '';
 
       approve.addEventListener('click', () => decide(`/approvals/${invoice.id}/approve`, {}));
       reject.addEventListener('click', () => decide(`/approvals/${invoice.id}/reject`, { reason: reason.value }));
 
       return el('li', {},
-        el('span', {}, `${invoice.id} · ${invoice.customerName} · ${money.format(invoice.amount)}`),
+        el('span', {}, [invoice.id, invoice.customerName, money.format(invoice.amount), secondApprovalStatus].filter(Boolean).join(' · ')),
         el('span', {}, approve),
         el('div', { class: 'reject-row' }, reason, reject));
     }));

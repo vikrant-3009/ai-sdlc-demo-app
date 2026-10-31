@@ -7,5 +7,6 @@ public interface IInvoiceRepository
     IReadOnlyList<Invoice> GetByIds(IEnumerable<string> ids);
     Invoice Add(Invoice invoice);
     void Update(Invoice invoice);
+    Invoice UpdateAtomically(string id, Action<Invoice> transition);
     bool Remove(string id);
 }
